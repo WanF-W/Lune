@@ -1,0 +1,40 @@
+#include <windows.h>
+#include "version.h"
+
+// ============================================================
+// Windows 文件版本资源
+// ============================================================
+// Windows 文件属性只负责标识发布产物；运行时兼容性由 HELLO 握手严格校验。
+// 根资源节点：Windows Explorer 从这里读取文件和产品版本信息。
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION LUNE_VERSION_NUMERIC            // 文件版本。
+ PRODUCTVERSION LUNE_VERSION_NUMERIC         // 产品版本。
+ FILEFLAGSMASK VS_FFI_FILEFLAGSMASK          // 使用标准版本标志掩码。
+#ifdef _DEBUG
+ FILEFLAGS VS_FF_DEBUG                       // Debug 构建标记。
+#else
+ FILEFLAGS 0x0L                              // Release 构建不设置 Debug 标记。
+#endif
+ FILEOS VOS_NT_WINDOWS32                     // 目标系统为 Windows NT。
+ FILETYPE VFT_APP                             // 产物类型为应用程序。
+ FILESUBTYPE VFT2_UNKNOWN                     // 应用程序没有额外子类型。
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        // 0804 表示简体中文，04B0 表示 Unicode 编码页。
+        BLOCK "080404B0"
+        BEGIN
+            VALUE "FileDescription", "Lune universal Lua controller" // Explorer 中显示的描述。
+            VALUE "FileVersion", LUNE_VERSION_STRING                 // 当前文件版本。
+            VALUE "InternalName", "Lune"                            // 内部产品名。
+            VALUE "OriginalFilename", "lune.exe"                    // 原始文件名。
+            VALUE "ProductName", "Lune"                             // 产品名。
+            VALUE "ProductVersion", LUNE_VERSION_STRING              // 当前产品版本。
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        // 声明上述字符串资源的语言和代码页。
+        VALUE "Translation", 0x0804, 1200
+    END
+END
