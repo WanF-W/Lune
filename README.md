@@ -2,7 +2,7 @@
 
 Lune 是 [Il2CppLua](https://github.com/WanF-W/Il2CppLua)、[MonoLua](https://github.com/WanF-W/MonoLua) 和 [UnrealLua](https://github.com/WanF-W/UnrealLua) 共用的 Windows x64 控制台工具：查找目标进程、注入配套 DLL，并通过命名管道提供 Lua REPL。
 
-Lune 由原来的 ILune、MLune、ULune 三个控制端合并而来，使用一个 `Lune.exe`，通过启动参数选择后端。旧命令的替换方式及行为差异见 [项目合并与迁移说明](MIGRATION.md)。
+Lune 由原来的 ILune、MLune、ULune 三个控制端合并而来，使用一个 `Lune.exe`，通过启动参数选择后端。
 
 Lune 负责进程定位、注入、通信和控制台交互；运行时适配、反射、对象访问、方法调用、Hook 和 Lua 执行由对应 DLL 完成。两端通过 `HELLO` 帧严格校验所选后端的协议版本。
 
