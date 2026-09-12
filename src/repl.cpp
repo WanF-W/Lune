@@ -205,6 +205,7 @@ namespace repl
             {
             case protocol::ErrorCategory::Lua: return "Lua Error";
             case protocol::ErrorCategory::Il2Cpp: return "Il2Cpp Error";
+            case protocol::ErrorCategory::Mono: return "Mono Error";
             case protocol::ErrorCategory::CSharp: return "CSharp Error";
             case protocol::ErrorCategory::Lune: return "Lune Error";
             default: return "Lune Error";

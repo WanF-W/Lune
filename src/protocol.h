@@ -44,6 +44,7 @@ namespace protocol
         Il2Cpp = 2,
         CSharp = 3,
         Lune = 4,
+        Mono = 5,
     };
 
     constexpr size_t ERROR_HEADER_SIZE = 5; // 类别 1 字节 + 行号 4 字节 LE
@@ -65,7 +66,7 @@ namespace protocol
 
         const uint8_t rawCategory = data[0];
         if (rawCategory < static_cast<uint8_t>(ErrorCategory::Lua)
-            || rawCategory > static_cast<uint8_t>(ErrorCategory::Lune))
+            || rawCategory > static_cast<uint8_t>(ErrorCategory::Mono))
         {
             return false;
         }
