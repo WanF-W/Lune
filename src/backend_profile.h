@@ -34,12 +34,12 @@ inline constexpr BackendProfile IL2CPP_PROFILE{
     L"i",
     L"ILune",
     L"Il2CppLua",
-    L"4.1.0",
+    L"4.1.1",
     L"IL2CPP",
     L"Il2CppLua.dll",
     L"\\\\.\\pipe\\Il2CppLua_",
     L"Il2CppLua_Config_",
-    "Il2CppLua/4.1.0",
+    "Il2CppLua/4.1.1",
     L"ilune >> ",
 };
 
@@ -48,12 +48,12 @@ inline constexpr BackendProfile MONO_PROFILE{
     L"m",
     L"MLune",
     L"MonoLua",
-    L"2.0.0",
+    L"2.0.1",
     L"Mono",
     L"MonoLua.dll",
     L"\\\\.\\pipe\\MonoLua_",
     L"MonoLua_Config_",
-    "MonoLua/2.0.0",
+    "MonoLua/2.0.1",
     L"mlune >> ",
 };
 

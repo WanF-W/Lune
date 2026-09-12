@@ -115,8 +115,8 @@ Lune 将 `HELLO` 负载与所选后端的握手字符串精确比较。当前配
 
 | 后端 | 要求的 HELLO 负载 |
 | --- | --- |
-| `-i` | `Il2CppLua/4.1.0` |
-| `-m` | `MonoLua/2.0.0` |
+| `-i` | `Il2CppLua/4.1.1` |
+| `-m` | `MonoLua/2.0.1` |
 | `-u` | `UnrealLua/1.0.0` |
 
 版本不匹配时会显示 `expected` / `received` 并终止连接，不继续等待 `READY` 或进入 REPL。
