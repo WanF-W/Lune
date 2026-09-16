@@ -4,7 +4,7 @@ Lune 是 [Il2CppLua](https://github.com/WanF-W/Il2CppLua)、[MonoLua](https://gi
 
 Lune 由原来的 ILune、MLune、ULune 三个控制端合并而来，使用一个 `Lune.exe`，通过启动参数选择后端。
 
-Lune 负责进程定位、注入、通信和控制台交互；运行时适配、反射、对象访问、方法调用、Hook 和 Lua 执行由对应 DLL 完成。两端通过 `HELLO` 帧严格校验所选后端的协议版本。
+Lune 负责参数解析和控制台交互，通过独立的 HostCore.dll 完成进程定位、注入、通信与会话管理；运行时适配、反射、对象访问、方法调用、Hook 和 Lua 执行由对应 DLL 完成。两端通过 `HELLO` 帧严格校验所选后端的协议版本。
 
 ## 功能
 
@@ -20,7 +20,7 @@ Lune 负责进程定位、注入、通信和控制台交互；运行时适配、
 
 ## 快速开始
 
-将 `Lune.exe` 与所需后端的匹配版本 DLL 放在同一目录，先启动目标游戏，再选择对应后端连接。只需准备本次使用的 DLL。
+将 `Lune.exe`、`HostCore.dll` 与所需后端的匹配版本 DLL 放在同一目录，先启动目标游戏，再选择对应后端连接。后端 DLL 只需准备本次使用的一个。
 
 | 后端 | 目标运行时 | 默认 DLL | 会话提示符 |
 | --- | --- | --- | --- |
@@ -116,12 +116,12 @@ Lune 将 `HELLO` 负载与所选后端的握手字符串精确比较。当前配
 | 后端 | 要求的 HELLO 负载 |
 | --- | --- |
 | `-i` | `Il2CppLua/4.1.1` |
-| `-m` | `MonoLua/2.0.1` |
+| `-m` | `MonoLua/3.0.0` |
 | `-u` | `UnrealLua/1.0.0` |
 
 版本不匹配时会显示 `expected` / `received` 并终止连接，不继续等待 `READY` 或进入 REPL。
 
-[backend_profile.h](src/backend_profile.h) 维护各后端的默认 DLL、显示版本、IPC 名称前缀、握手字符串和提示符；[protocol.h](src/protocol.h) 维护通用消息类型、负载格式和超时；[version.h](src/version.h) 只维护 Lune 自身产品版本。Lune 的版本号与三个 DLL 的版本独立，配套关系以所选后端的协议配置为准。
+[backend_profile.h](HostCore/src/backend_profile.h) 维护各后端的默认 DLL、显示版本、IPC 名称前缀、握手字符串和提示符；[protocol.h](HostCore/src/protocol.h) 维护通用消息类型、负载格式和超时；[version.h](src/version.h) 只维护 Lune 自身产品版本。Lune 的版本号与三个 DLL 的版本独立，配套关系以所选后端的协议配置为准。
 
 `MSG_ERROR` 支持类别、可选行号和错误文本，控制台也保留对旧纯文本错误负载的显示兼容。该兼容不绕过 `HELLO` 版本校验。
 
@@ -161,27 +161,25 @@ dofile([[C:\Scripts\test.lua]])
 
 ```text
 README.md              使用说明
-MIGRATION.md           ILune / MLune / ULune 合并与迁移说明
 src/
-  lune.cpp             参数、启动流程、握手和 REPL 主循环
-  backend_profile.h    三个后端的 DLL、版本、IPC 名称和提示符配置
+  lune.cpp             参数、HostCore 调用、启动脚本和 REPL 主循环
   console_ui.*         控制台输入、UTF-8 输出、颜色和异步日志
-  repl.*               Lua 输入分类、命令发送和响应处理
-  injector.*           进程查找、共享内存和 DLL 注入
-  pipe_server.*        EXE 侧命名管道、重叠 I/O 和响应队列
-  protocol.h           通用消息类型、负载格式和超时定义
+  session_ui.*         HostCore 结构化事件到原有控制台输出的映射
+  repl.*               Lua 输入分类与 HostCore 命令调用
   version.h            Lune 产品版本定义
   version.rc           Windows 文件版本资源
-  win_handle.h         Windows HANDLE 的最小 RAII 封装
+HostCore/
+  include/hostcore.h   公开 C ABI 会话接口
+  src/                注入、管道、协议、后端配置及会话实现
 ```
 
-模块边界保持简单：`lune.cpp` 编排流程，`backend_profile` 提供后端配置，`injector` 不处理管道帧，`pipe_server` 不理解 Lua 业务，`repl` 不负责控制台渲染，UI 不参与协议和注入。
+Lune 只包含 HostCore 的公开头文件，不引用内部管道、注入器或协议头文件。控制台取消事件由 Lune 自己持有，收到 HostCore 断线事件后置位。接口与生命周期说明见 [HostCore README](HostCore/README.md)。
 
 ## 构建
 
 环境要求：Windows x64、Visual Studio 2026（v145 工具集）和 Windows SDK 10.0。工程提供 `Release | x64` 与 `Debug | x64` 配置。
 
-在 Visual Studio 中打开 `Lune.slnx`，选择 `Release | x64` 生成。工程启用 C++20、Level 4 警告、警告视为错误、SDL 检查和 UTF-8 源文件编码。
+`Lune.slnx` 包含 `Lune` 与 `HostCore` 两个项目。在 Visual Studio 中打开 `Lune.slnx`，选择 `Release | x64` 生成。工程启用 C++20、Level 4 警告、警告视为错误、SDL 检查和 UTF-8 源文件编码。
 
 命令行构建示例：
 
@@ -189,7 +187,7 @@ src/
 msbuild Lune.vcxproj /p:Configuration=Release /p:Platform=x64
 ```
 
-产物为 `Lune.exe`；各后端 DLL 由对应项目单独构建。
+Lune 的项目引用会构建并链接 `HostCore.lib`，随后将 `HostCore.dll` 复制到 `Lune.exe` 输出目录。HostCore 自身产物位于 `HostCore/bin/x64/<Configuration>/`；各后端 DLL 由对应项目单独构建。
 
 ## 运行限制与故障排查
 
@@ -205,10 +203,11 @@ msbuild Lune.vcxproj /p:Configuration=Release /p:Platform=x64
 ## 维护约定
 
 - 修改消息类型、负载格式或 IPC 名称规则时，同步检查受影响的 DLL 项目，保持两端协议兼容。
-- 更新某个后端时，在 `backend_profile.h` 中维护该后端的版本与配置；Lune 自身产品版本由 `version.h` 单独维护。
+- 更新某个后端时，在 `HostCore/src/backend_profile.h` 中维护该后端的版本与配置；Lune 自身产品版本由 `version.h` 单独维护。
 - 运行时专用逻辑放在对应 DLL 中，共用的注入、传输和控制台流程保持统一。
 - 资源所有权应在创建处明确，并尽量使用 RAII；跨线程停止先取消 I/O，再等待线程退出，最后关闭句柄。
 
 ## License
 
 MIT License，详见 [LICENSE.txt](LICENSE.txt)。
+

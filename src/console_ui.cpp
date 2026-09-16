@@ -196,7 +196,7 @@ namespace ui
 
     void QueueAsyncLog(const char* text)
     {
-        // PipeServer 传入的指针只在本次回调期间有效，不能保存到其他线程。
+        // HostCore 传入的指针只在本次回调期间有效，不能保存到其他线程。
         if (text == nullptr) return;
 
         std::string message(text);
@@ -410,7 +410,7 @@ namespace ui
 
     void SetPrompt(const wchar_t* prompt)
     {
-        // 提示符来自静态 BackendProfile，不复制字符串，也不持有外部资源。
+        // 提示符来自静态 HC_BackendInfo，不复制字符串，也不持有外部资源。
         if (prompt != nullptr && *prompt != L'\0') g_prompt = prompt;
     }
 
@@ -428,3 +428,4 @@ namespace ui
         std::wcout.flush();
     }
 }
+

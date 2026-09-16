@@ -40,14 +40,15 @@ namespace ui
     bool DrainAsyncLogs(bool addSeparator);
 
     // 从控制台读取一行 UTF-16 输入，再转换为发送给 DLL 的 UTF-8。
-    // cancelEvent 由会话层提供；目标进程/管道断开时可打断当前输入。
+    // cancelEvent 由 Lune 持有并在 HostCore 断线回调中置位；目标进程/管道断开时可打断当前输入。
     bool ReadLineUtf8(std::string& outUtf8, HANDLE cancelEvent = nullptr);
 
     // 以下状态只用于异步日志和提示符之间的排版协调。
     void SetPromptActive(bool active);
     void SetPromptSeparate();
 
-    // 设置当前后端的会话提示符；字符串由 BackendProfile 静态持有。
+    // 设置当前后端的会话提示符；字符串由 HC_BackendInfo 静态持有。
     void SetPrompt(const wchar_t* prompt);
     void PrintPrompt();
 }
+

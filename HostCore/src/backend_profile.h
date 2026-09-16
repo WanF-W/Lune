@@ -48,12 +48,12 @@ inline constexpr BackendProfile MONO_PROFILE{
     L"m",
     L"MLune",
     L"MonoLua",
-    L"2.0.1",
+    L"3.0.0",
     L"Mono",
     L"MonoLua.dll",
     L"\\\\.\\pipe\\MonoLua_",
     L"MonoLua_Config_",
-    "MonoLua/2.0.1",
+    "MonoLua/3.0.0",
     L"mlune >> ",
 };
 

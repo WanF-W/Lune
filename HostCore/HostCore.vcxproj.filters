@@ -1,0 +1,40 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="cpp_src">
+      <UniqueIdentifier>{3b005c53-4e8b-4df2-b4d4-36a820bd772c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="h_src">
+      <UniqueIdentifier>{e6ed6456-c265-40b6-8c2e-c6ab91c98bea}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="src\backend_profile.h">
+      <Filter>h_src</Filter>
+    </ClInclude>
+    <ClCompile Include="src\hostcore.cpp">
+      <Filter>cpp_src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\injector.cpp">
+      <Filter>cpp_src</Filter>
+    </ClCompile>
+    <ClInclude Include="src\injector.h">
+      <Filter>h_src</Filter>
+    </ClInclude>
+    <ClCompile Include="src\pipe_server.cpp">
+      <Filter>cpp_src</Filter>
+    </ClCompile>
+    <ClInclude Include="src\pipe_server.h">
+      <Filter>h_src</Filter>
+    </ClInclude>
+    <ClInclude Include="src\protocol.h">
+      <Filter>h_src</Filter>
+    </ClInclude>
+    <ClInclude Include="src\win_handle.h">
+      <Filter>h_src</Filter>
+    </ClInclude>
+    <ClInclude Include="include\hostcore.h">
+      <Filter>h_src</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>

@@ -20,6 +20,7 @@
 #include <deque>
 #include <functional>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -31,6 +32,15 @@
 class PipeServer
 {
 public:
+    enum class Stage { Connect, Wait, Complete, Hello, Ready };
+    struct Error {
+        Stage stage = Stage::Connect;
+        const char* api = nullptr; // nullptr 表示协议/等待逻辑错误，不伪造 Win32 API。
+        DWORD code = ERROR_SUCCESS;
+        bool timeout = false;
+    };
+    Error GetError() const;
+    void SetCancelCallback(std::function<bool()> cb) { m_cancelCallback = std::move(cb); }
     // ============================================================
     // 帧结构
     // ============================================================
@@ -49,17 +59,18 @@ public:
 
     // 创建单个双工字节模式命名管道，并以 FILE_FLAG_OVERLAPPED 打开，
     // 使后台读取线程的挂起读不会阻塞主线程的写操作。
-    // pipeName 为完整管道名称；返回 true 表示创建成功。
+    // pipeName 为完整管道名称；返回 true 表示连接已完成或已提交异步连接。
     bool Start(const wchar_t* pipeName);
 
-    // 停止服务器：关闭管道、退出后台读取线程并清空响应队列。
+    // 停止服务器：取消 I/O、等待读写完成，关闭管道并清空响应队列。
     void Stop();
 
     // 请求停止但不等待后台线程，供控制台控制处理函数使用。
     // 真正的资源回收仍由主线程调用 Stop 完成。
     void RequestStop() noexcept;
 
-    // 等待 DLL 客户端连接；timeoutMs 为毫秒数，-1 表示无限等待。
+    // 只等待 Start 已提交的连接，不重复调用 ConnectNamedPipe。
+    // timeoutMs 为毫秒数，-1 表示无限等待。
     // 连接成功后启动后台读取线程，持续读取 DLL 发来的帧。
     bool WaitForClient(int timeoutMs);
 
@@ -73,6 +84,9 @@ public:
     // 设置日志回调。DLL 发来的 MSG_LOG 帧由后台读取线程实时转发，
     // 因此不需要等待用户输入命令；必须在 WaitForClient 之前设置。
     void SetLogCallback(std::function<void(const char*)> cb) { m_logCallback = std::move(cb); }
+
+    // 只通知断线，不向库调用者暴露事件句柄。连接前设置。
+    void SetDisconnectCallback(std::function<void()> cb) { m_disconnectCallback = std::move(cb); }
 
     // 向 DLL 发送一个帧；data 可为 nullptr，但仅在 len 为 0 时有效。
     // 返回 true 表示完整帧已写入管道。
@@ -102,11 +116,19 @@ public:
     bool WaitForFrame(uint8_t expectedType, Frame& out, int timeoutMs);
 
 private:
+    bool Fail(Stage stage, const char* api, DWORD code, bool timeout = false);
+    void ClosePipe(); // 所有读写已完成后调用。
     // 后台读取线程主循环
     void ReaderLoop();
 
     // 成员变量
     HANDLE m_pipe = INVALID_HANDLE_VALUE;   // 管道句柄（FILE_FLAG_OVERLAPPED）
+    OVERLAPPED m_connect{};
+    enum class ConnectionState { Idle, Pending, Connected };
+    ConnectionState m_connectionState = ConnectionState::Idle;
+    mutable std::mutex m_errorMutex;
+    Error m_error;
+    std::function<bool()> m_cancelCallback;
     mutable std::mutex m_handleMutex;       // 保护句柄关闭与取消操作
 
     std::atomic<bool> m_connected{ false }; // 连接状态（原子操作）
@@ -116,6 +138,7 @@ private:
     std::thread m_readerThread;                       // 后台读取线程
     std::function<void(const char*)> m_logCallback;   // 日志实时输出回调
 
+    std::function<void()> m_disconnectCallback;
     HANDLE m_disconnectEvent = nullptr;               // 连接断开通知事件
 
     std::deque<Frame> m_frameQueue;         // 响应帧队列（OK/ERROR/EXIT）
@@ -124,3 +147,4 @@ private:
 
     static constexpr size_t MAX_QUEUED_FRAMES = 256;
 };
+

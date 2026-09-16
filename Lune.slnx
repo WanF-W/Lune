@@ -3,4 +3,6 @@
     <Platform Name="x64" />
   </Configurations>
   <Project Path="Lune.vcxproj" Id="5fa24b0d-2c6b-4ca4-be4d-dadb84a6d600" />
+  <Project Path="HostCore\HostCore.vcxproj" Id="79689fe2-dfa0-4101-8638-52eb9fd58bef" />
 </Solution>
+

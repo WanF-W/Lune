@@ -7,8 +7,8 @@
 #include "repl.h"
 
 #include "console_ui.h"
-#include "pipe_server.h"
-#include "protocol.h"
+
+
 
 #include <cctype>
 #include <chrono>
@@ -199,70 +199,6 @@ namespace repl
             return false;
         }
 
-        const char* ErrorCategoryLabel(protocol::ErrorCategory category)
-        {
-            switch (category)
-            {
-            case protocol::ErrorCategory::Lua: return "Lua Error";
-            case protocol::ErrorCategory::Il2Cpp: return "Il2Cpp Error";
-            case protocol::ErrorCategory::Mono: return "Mono Error";
-            case protocol::ErrorCategory::CSharp: return "CSharp Error";
-            case protocol::ErrorCategory::Lune: return "Lune Error";
-            default: return "Lune Error";
-            }
-        }
-
-        void PrintErrorPayloadImpl(const std::vector<uint8_t>& payload)
-        {
-            protocol::ErrorPayloadView error;
-            std::string message;
-            protocol::ErrorCategory category = protocol::ErrorCategory::Lune;
-            int32_t line = -1;
-
-            if (protocol::DecodeErrorPayload(payload.data(),
-                    static_cast<uint32_t>(payload.size()), error))
-            {
-                category = error.category;
-                line = error.line;
-                if (error.messageLength > 0)
-                    message.assign(error.message, error.messageLength);
-            }
-            else
-            {
-                // 兼容旧版 DLL 的纯文本 MSG_ERROR；新协议不会走这里。
-                message.assign(payload.begin(), payload.end());
-            }
-
-            while (!message.empty()
-                && (message.back() == '\r' || message.back() == '\n'))
-            {
-                message.pop_back();
-            }
-            if (message.empty()) message = "execution failed";
-
-            std::string output = "[";
-            output += ErrorCategoryLabel(category);
-            output += "]";
-            if (line > 0)
-            {
-                output += " line ";
-                output += std::to_string(line);
-            }
-            output += ": ";
-            output += message;
-            output += "\n";
-
-            ui::color::Red();
-            // 后端日志和错误必须走同一个控制台输出流；否则 stdout/stderr
-            // 在重定向或缓冲场景下仍可能出现视觉上的乱序。
-            ui::SafePrintUtf8(output);
-            ui::color::Reset();
-        }
-    }
-
-    void PrintErrorPayload(const std::vector<uint8_t>& payload)
-    {
-        PrintErrorPayloadImpl(payload);
     }
 
     // ============================================================
@@ -304,112 +240,12 @@ namespace repl
     // ============================================================
     // 命令发送与响应处理
     // ============================================================
-    bool ExecuteCommand(
-        PipeServer& server, const std::string& code, int timeoutMs)
+    bool ExecuteCommand(HC_Session session, const std::string& code, int timeoutMs)
     {
-        // MAX_PAYLOAD 是协议边界，先在 REPL 层拒绝过大命令，避免无效发送。
-        if (code.size() > protocol::MAX_PAYLOAD)
-        {
-            ui::color::Red();
-            ui::SafePrintUtf8("[Lune Error] Command is too large (maximum 1 MB)\n");
-            ui::color::Reset();
-            return false;
-        }
-
-        // 命令内容不在这里改写；启动脚本也已经在调用方拼成 dofile 命令。
-        if (!server.SendFrame(
-                protocol::MSG_CMD,
-                code.data(),
-                static_cast<uint32_t>(code.size())))
-        {
-            ui::color::Red();
-            ui::SafePrintUtf8("[Lune Error] Failed to send command\n");
-            ui::color::Reset();
-            return false;
-        }
-
-        // 从发送完成开始计时，确保网络/管道等待也包含在命令超时内。
-        const auto startTime = std::chrono::steady_clock::now();
-
-        // 一条命令只消费到自己的终结响应；日志由 ReaderLoop 异步交给 UI。
-        while (true)
-        {
-            // 每次收到日志或无关帧后重新计算剩余时间，不能重置整个超时窗口。
-            int remaining = timeoutMs;
-            if (timeoutMs > 0)
-            {
-                // 使用 steady_clock，避免系统时间调整导致超时倒退或提前。
-                const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::steady_clock::now() - startTime).count();
-                remaining = timeoutMs - static_cast<int>(elapsed);
-                if (remaining <= 0)
-                {
-                    // 超时后关闭当前连接，防止迟到的 OK 被下一条命令消费。
-                    ui::color::Red();
-                    ui::SafePrintUtf8("[Lune Error] Command timeout\n");
-                    ui::color::Reset();
-                    server.Stop();
-                    return false;
-                }
-            }
-
-            // ReaderLoop 把日志放入 UI 队列；这里用短等待持续排空，
-            // 确保后端执行较慢时日志也能及时显示，而不是等 MSG_OK 才出现。
-            PipeServer::Frame frame;
-            constexpr int LOG_POLL_INTERVAL_MS = 50;
-            const int waitMs = (remaining > 0)
-                ? (remaining < LOG_POLL_INTERVAL_MS ? remaining : LOG_POLL_INTERVAL_MS)
-                : remaining;
-            const auto status = server.ReceiveFrame(frame, waitMs);
-            if (status == PipeServer::ReceiveStatus::Timeout)
-            {
-                // 这里通常只是一次日志轮询超时；真正的命令超时由循环顶部
-                // 根据 startTime 判断，避免把慢命令误报成超时。
-                ui::DrainAsyncLogs(false);
-                continue;
-            }
-
-            if (status == PipeServer::ReceiveStatus::Disconnected)
-            {
-                ui::DrainAsyncLogs(false);
-                // 没有响应且连接已断开，不再尝试读取队列或重发命令。
-                ui::color::Red();
-                ui::SafePrintUtf8("[Lune Error] Connection lost\n");
-                ui::color::Reset();
-                return false;
-            }
-
-            // ReaderLoop 按管道顺序先处理 MSG_LOG，再把控制帧放入队列；
-            // 消费控制帧前再排空一次，保证最终响应前的日志不会落到下一条命令。
-            ui::DrainAsyncLogs(false);
-
-            switch (frame.type)
-            {
-            case protocol::MSG_OK:
-                // OK 是本条命令的终结响应，返回成功给调用方。
-                ui::DrainAsyncLogs(false);
-                return true;
-
-            case protocol::MSG_ERROR:
-            {
-                ui::DrainAsyncLogs(false);
-                PrintErrorPayload(frame.payload);
-                return false;
-            }
-
-            case protocol::MSG_EXIT:
-                // DLL 主动退出后停止读线程，避免主循环继续向失效连接发送命令。
-                ui::color::Yellow();
-                ui::SafePrintUtf8("[*] DLL requested disconnect\n");
-                ui::color::Reset();
-                server.Stop();
-                return false;
-
-            default:
-                // 传输层已经过滤未知类型；此处保留防御性分支以避免异常帧终止进程。
-                // ReaderLoop 只应把协议帧放入队列；未知帧会在传输层被拒绝。
-                continue;
-            }
-        }
+        // HostCore owns protocol limits, command deadlines and terminal responses.
+        const uint32_t length = code.size() > UINT32_MAX ? UINT32_MAX : static_cast<uint32_t>(code.size());
+        const bool success = HC_SendCommand(session, code.data(), length, timeoutMs) == HC_SUCCESS;
+        ui::DrainAsyncLogs(false);
+        return success;
     }
 }

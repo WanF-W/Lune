@@ -1,7 +1,7 @@
 // ============================================================
-// injector.h — Lune DLL 注入器声明
+// injector.h — HostCore 内部 DLL 注入器声明
 // ============================================================
-// 本模块运行在 lune.exe（注入器）中，负责进程定位、共享内存和 DLL 注入。
+// 本模块运行在宿主进程的 HostCore.dll 中，负责进程定位、共享内存和 DLL 注入。
 // 远程线程未完成前不得释放 DLL 路径；共享内存句柄由握手流程决定释放时机。
 // 仅针对 Windows x64。
 // ============================================================
@@ -10,7 +10,7 @@
 #include <string>
 
 // ============================================================
-// Injector — DLL 注入器（静态工具类）
+// Injector — 会话独立持有的 DLL 注入器
 // ============================================================
 class Injector
 {
@@ -32,20 +32,22 @@ public:
     // ============================================================
     // 创建共享内存后，将 DLL 路径传入目标进程并启动远程 LoadLibraryW 线程。
     // 远程线程完成后释放路径内存；共享内存句柄由握手完成后的调用方关闭。
-    static bool Inject(
+    bool Inject(
         DWORD pid,
         const std::wstring& dllPath,
         const wchar_t* pipeName,
         const wchar_t* sharedMemoryPrefix);
 
     // 释放共享内存
-    static void CloseSharedMemory();
+    void CloseSharedMemory();
+
+    // 每个会话独立持有共享内存，禁止复制所有权。
+    Injector() = default;
+    ~Injector() { CloseSharedMemory(); }
+    Injector(const Injector&) = delete;
+    Injector& operator=(const Injector&) = delete;
 
 private:
-    // 禁止实例化（纯静态工具类）
-    Injector() = delete;
-    ~Injector() = delete;
-
     // 创建共享内存并写入管道名称；共享内存名称由目标 PID 参与构造。
     static HANDLE CreateSharedMemory(
         DWORD pid,
@@ -57,5 +59,7 @@ private:
     static HANDLE InjectViaNtCreateThreadEx(HANDLE hProcess, void* loadLibrary, void* param);
 
     // 共享内存句柄
-    static HANDLE shareMemHandle;
+    HANDLE shareMemHandle = nullptr;
 };
+
+

@@ -223,7 +223,7 @@ HANDLE Injector::CreateSharedMemory(
 
 
 // 初始化
-void* Injector::shareMemHandle = nullptr;
+
 
 // ============================================================
 // DLL 注入主函数
@@ -242,7 +242,7 @@ bool Injector::Inject(
         return false;
     }
 
-    // 共享内存需要跨越 Inject 与 HELLO 握手两个阶段，因此由静态句柄持有。
+    // 共享内存需要跨越 Inject 与 HELLO 握手两个阶段，因此由会话实例持有。
     // 每次新注入前先关闭上一次可能遗留的句柄，避免句柄状态串线。
     // 清理上一轮可能残留的共享内存，保证同一个 Injector 状态不会串线。
     CloseSharedMemory();
@@ -438,3 +438,4 @@ void Injector::CloseSharedMemory()
         shareMemHandle = nullptr;
     }
 }
+

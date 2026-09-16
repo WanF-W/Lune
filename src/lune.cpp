@@ -2,17 +2,14 @@
 // lune.cpp — Lune 程序入口与生命周期编排
 //
 // 本文件只负责把参数解析、进程定位、注入、握手和 REPL 串成一条流程。
-// 控制台细节位于 console_ui，Lua 命令处理位于 repl，管道和注入实现不
-// 直接依赖彼此的业务逻辑。
+// 控制台细节位于 console_ui，Lua 输入处理位于 repl；底层会话统一通过
+// HostCore 的公开接口调用。
 // ============================================================
 #include "console_ui.h"
-#include "backend_profile.h"
-#include "injector.h"
-#include "pipe_server.h"
-#include "protocol.h"
+#include "session_ui.h"
+
 #include "repl.h"
 #include "version.h"
-#include "win_handle.h"
 
 #include <windows.h>
 
@@ -35,7 +32,8 @@ namespace
     struct Args
     {
         // 后端选择决定默认 DLL、IPC 名称和 HELLO 版本。
-        const BackendProfile* backend = nullptr;
+        const HC_BackendInfo* backend = nullptr;
+        uint32_t backendSelector = 0;
 
         // 进程名和 PID 二选一；解析阶段会记录用户实际选择了哪一种。
         std::wstring processName;
@@ -107,7 +105,8 @@ namespace
                     args.error = L"Specify only one backend: -i, -m or -u.";
                     return false;
                 }
-                args.backend = FindBackend(option[1]);
+                args.backendSelector = static_cast<uint32_t>(option[1]);
+                args.backend = HC_GetBackendInfo(args.backendSelector);
                 continue;
             }
 
@@ -126,7 +125,7 @@ namespace
 
             if (IsOption(option, L"-n", L"--name"))
             {
-                // 进程名只保存文本，实际查找交给 Injector。
+                // 进程名只保存文本，实际查找交给 HostCore。
                 args.processName = argv[++i];
                 hasName = true;
             }
@@ -142,7 +141,7 @@ namespace
             }
             else if (IsOption(option, L"-d", L"--dll"))
             {
-                // DLL 路径暂不在这里访问文件，统一由 LocateDll 校验。
+                // DLL 路径暂不在这里访问文件，统一由 HostCore 校验。
                 args.dllPath = argv[++i];
             }
             else if (IsOption(option, L"-l", L"--lua"))
@@ -179,7 +178,7 @@ namespace
     // ============================================================
     // 控制台帮助与路径定位
     // ============================================================
-    void PrintBanner(const BackendProfile& backend)
+    void PrintBanner(const HC_BackendInfo& backend)
     {
         // 保留统一的横线标题框；横线使用青色，标题内容使用黄色。
         ui::color::Cyan();
@@ -219,14 +218,6 @@ namespace
         std::wcout << L"  -d, --dll <path>   Override the selected backend DLL path\n";
         std::wcout << L"  -l, --lua <path>   Startup Lua script\n";
         std::wcout << L"  -h, --help         Show this help\n";
-    }
-
-    bool IsRegularFile(const std::wstring& path)
-    {
-        // 目录不能作为 DLL 或脚本文件传入；这里仅做属性检查。
-        const DWORD attributes = GetFileAttributesW(path.c_str());
-        return attributes != INVALID_FILE_ATTRIBUTES
-            && (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
     }
 
     std::wstring GetFullPath(const std::wstring& path)
@@ -283,84 +274,6 @@ namespace
         return result;
     }
 
-    std::wstring GetExecutablePath()
-    {
-        // MAX_PATH 只是初始容量；路径过长时根据 API 返回值动态扩大。
-        std::vector<wchar_t> buffer(MAX_PATH);
-        while (true)
-        {
-            const DWORD length = GetModuleFileNameW(
-                nullptr,
-                buffer.data(),
-                static_cast<DWORD>(buffer.size()));
-            if (length == 0) return {};
-            // length + 1 < size 表示返回值没有触及缓冲区上限，可以安全构造字符串。
-            if (length + 1 < buffer.size()) return std::wstring(buffer.data(), length);
-            // API 返回长度达到容量时，扩大后重试，避免截断 DLL 路径。
-            buffer.resize(buffer.size() * 2);
-        }
-    }
-
-    std::wstring LocateDll(const std::wstring& explicitPath, const BackendProfile& backend)
-    {
-        if (!explicitPath.empty())
-        {
-            // 显式路径优先级最高；不自动替换用户给出的路径。
-            if (IsRegularFile(explicitPath)) return explicitPath;
-
-            ui::color::Red();
-            std::wcerr << L"[Lune Error] DLL not found or is not a file: " << explicitPath << L"\n";
-            ui::color::Reset();
-            return {};
-        }
-
-        // 默认路径跟随 exe，而不是当前工作目录，避免从不同目录启动时行为变化。
-        const std::wstring executablePath = GetExecutablePath();
-        const size_t separator = executablePath.find_last_of(L"\\/");
-        if (separator == std::wstring::npos)
-        {
-            ui::color::Red();
-            std::wcerr << L"[Lune Error] Cannot determine the Lune executable directory.\n";
-            ui::color::Reset();
-            return {};
-        }
-
-        // 默认 DLL 与 lune.exe 同目录，而不是与当前工作目录同目录。
-        const std::wstring candidate = executablePath.substr(0, separator + 1) + backend.dllName;
-        if (IsRegularFile(candidate)) return candidate;
-
-        ui::color::Red();
-        std::wcerr << L"[Lune Error] Cannot find " << backend.dllName << L" next to lune.exe.\n";
-        std::wcerr << L"    Use --dll to specify the path explicitly.\n";
-        ui::color::Reset();
-        return {};
-    }
-
-    DWORD LocateTarget(const Args& args)
-    {
-        if (args.pid != 0)
-        {
-            // PID 模式先尝试打开进程，尽早报告权限或进程不存在问题。
-            win::UniqueHandle process(Injector::OpenTargetProcess(args.pid));
-            if (process) return args.pid;
-
-            ui::color::Red();
-            std::wcerr << L"[Lune Error] Cannot open process with PID " << args.pid << L"\n";
-            ui::color::Reset();
-            return 0;
-        }
-
-        // 名称模式由 Injector 枚举进程并执行不区分大小写匹配。
-        const DWORD pid = Injector::FindProcessByName(args.processName);
-        if (pid == 0)
-        {
-            ui::color::Red();
-        std::wcerr << L"[Lune Error] Process not found: " << args.processName << L"\n";
-            ui::color::Reset();
-        }
-        return pid;
-    }
-
     // ============================================================
     // 控制台关闭处理
     // ============================================================
@@ -400,185 +313,65 @@ int wmain(int argc, wchar_t* argv[])
     // ============================================================
     // 启动前检查
     // ============================================================
-    const BackendProfile& backend = *args.backend;
+    const HC_BackendInfo& backend = *args.backend;
     ui::SetPrompt(backend.prompt);
     PrintBanner(backend);
 
-    ui::color::Gray();
-    std::wcout << L"[*] Locating target process...\n";
-    ui::color::Reset();
-    // 先定位目标进程，后续管道和注入都依赖这个 PID。
-    const DWORD pid = LocateTarget(args);
-    if (pid == 0) return 1;
-
-    const std::wstring processName = Injector::GetProcessName(pid);
-    ui::color::Green();
-    std::wcout << L"[+] Target: "
-               << (processName.empty() ? L"<unknown>" : processName)
-               << L" (PID: " << pid << L")\n";
-    ui::color::Reset();
-
-    ui::color::Gray();
-    std::wcout << L"[*] Locating " << backend.dllName << L"...\n";
-    ui::color::Reset();
-    // 进程确认后再解析 DLL，避免找不到进程时无意义地访问文件系统。
-    const std::wstring dllPath = LocateDll(args.dllPath, backend);
-    if (dllPath.empty()) return 1;
-
-    ui::color::Green();
-    std::wcout << L"[+] DLL: " << dllPath << L"\n";
-    ui::color::Reset();
-
-    // ============================================================
-    // 创建 IPC 服务
-    // ============================================================
-    // 管道名必须与配套 DLL 根据 PID 生成的名称完全一致。
-    wchar_t pipeName[128]{};
-    if (swprintf_s(pipeName, 128, L"%s%lu", backend.pipePrefix, pid) < 0)
-    {
+    struct DisplayContext {
+        HANDLE disconnectEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        ~DisplayContext() { if (disconnectEvent) CloseHandle(disconnectEvent); }
+        bool lifecycleStarted = false;
+        bool ctrlHandlerInstalled = false;
+    } display;
+    struct SessionOwner {
+        HC_Session handle = nullptr;
+        ~SessionOwner() { HC_DestroySession(handle); }
+    } session;
+    if (!display.disconnectEvent) {
         ui::color::Red();
-        std::wcerr << L"[Lune Error] Failed to build the pipe name.\n";
+        std::wcerr << L"[Lune Error] Failed to create session.\n";
         ui::color::Reset();
         return 1;
     }
-
-    // server 的生命周期覆盖整个注入和 REPL 阶段，离开作用域前统一 Stop。
-    PipeServer server;
-    const bool ctrlHandlerInstalled = SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE) != FALSE;
-    if (!ctrlHandlerInstalled)
-    {
-        ui::color::Yellow();
-        std::wcerr << L"[Lune Error] Ctrl+C handler could not be installed.\n";
+    HC_SessionOptions options{};
+    options.structSize = static_cast<uint32_t>(sizeof(options));
+    options.abiVersion = HC_ABI_VERSION;
+    options.backend = args.backendSelector;
+    options.pid = args.pid;
+    options.processName = args.processName.c_str();
+    options.dllPath = args.dllPath.c_str();
+    options.context = &display;
+    options.cancelCallback = [](void*) -> int32_t { return g_shutdownRequested.load() ? 1 : 0; };
+    options.eventCallback = [](void* context, const HC_Event* event) {
+        auto& state = *static_cast<DisplayContext*>(context);
+        if (event->kind == HC_CREATING_PIPE) {
+            state.lifecycleStarted = true;
+            state.ctrlHandlerInstalled = SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE) != FALSE;
+            if (!state.ctrlHandlerInstalled) {
+                ui::color::Yellow();
+                std::wcerr << L"[Lune Error] Ctrl+C handler could not be installed.\n";
+                ui::color::Reset();
+            }
+        }
+        if (event->kind == HC_DISCONNECTED) {
+            SetEvent(state.disconnectEvent);
+            return;
+        }
+        ui::DisplaySessionEvent(nullptr, event);
+    };
+    if (HC_CreateSession(&options, &session.handle) != HC_SUCCESS) {
+        ui::color::Red();
+        std::wcerr << L"[Lune Error] Failed to create session.\n";
         ui::color::Reset();
+        return 1;
     }
-
-    server.SetLogCallback([](const char* text) {
-        // PipeServer 不理解业务；后台线程只把日志交给 console_ui 排队。
-        // 控制台日志写入在回调线程即时完成；提示符状态仍由 console_ui 统一协调。
-        ui::QueueAsyncLog(text);
-    });
-
     int result = 1;
     do
     {
-        // 先创建管道，再注入 DLL，确保 DLL 连接时服务端已经准备完成。
-        ui::color::Gray();
-        std::wcout << L"[*] Creating pipe server...\n";
-        ui::color::Reset();
-        if (!server.Start(pipeName))
-        {
-            ui::color::Red();
-            std::wcerr << L"[Lune Error] Failed to create pipe server.\n";
-            ui::color::Reset();
+        if (HC_StartSession(session.handle) != HC_SUCCESS) {
+            if (!display.lifecycleStarted) return 1;
             break;
         }
-        if (g_shutdownRequested.load()) break;
-
-        // 注入失败时直接进入统一清理，不继续等待不存在的连接。
-        ui::color::Gray();
-        std::wcout << L"[*] Injecting DLL...\n";
-        ui::color::Reset();
-        if (!Injector::Inject(pid, dllPath, pipeName, backend.sharedMemoryPrefix))
-        {
-            ui::color::Red();
-            std::wcerr << L"[Lune Error] Injection failed.\n";
-            ui::color::Reset();
-            break;
-        }
-        if (g_shutdownRequested.load()) break;
-
-        ui::color::Green();
-        std::wcout << L"[+] DLL injected\n";
-        ui::color::Reset();
-
-        ui::color::Gray();
-        std::wcout << L"[*] Waiting for DLL to connect...\n";
-        ui::color::Reset();
-        // 等待 DLL 连接；连接超时会由 PipeServer 取消挂起的 ConnectNamedPipe。
-        if (!server.WaitForClient(protocol::HANDSHAKE_TIMEOUT))
-        {
-            if (!g_shutdownRequested.load())
-            {
-                ui::color::Red();
-                std::wcerr << L"[Lune Error] DLL did not connect within "
-                           << protocol::HANDSHAKE_TIMEOUT / 1000 << L" seconds.\n";
-                ui::color::Reset();
-            }
-            break;
-        }
-
-        ui::color::Green();
-        std::wcout << L"[+] DLL connected\n";
-        ui::color::Reset();
-
-        ui::color::Gray();
-        std::wcout << L"[*] Handshake...\n";
-        ui::color::Reset();
-
-        // ============================================================
-        // HELLO / READY 版本握手
-        // ============================================================
-        // HELLO 和 READY 必须按顺序到达，WaitForFrame 会拒绝乱序或错误帧。
-        PipeServer::Frame frame;
-        if (!server.WaitForFrame(protocol::MSG_HELLO, frame, protocol::DLLSAYHELLO_TIMEOUT))
-        {
-            ui::color::Red();
-            if (frame.type == protocol::MSG_ERROR)
-            {
-                ui::DrainAsyncLogs(false);
-                repl::PrintErrorPayload(frame.payload);
-            }
-            else
-            {
-                std::wcerr << L"[Lune Error] Handshake failed: no HELLO.\n";
-            }
-            ui::color::Reset();
-            break;
-        }
-
-        // HELLO 负载是版本字符串，必须精确匹配，避免两端协议不兼容时继续运行。
-        const std::string hello(frame.payload.begin(), frame.payload.end());
-        if (hello != backend.protocolVersion)
-        {
-            ui::color::Red();
-            ui::SafePrintUtf8(
-                "[Lune Error] Version mismatch: expected " + std::string(backend.protocolVersion)
-                + ", received " + hello + "\n", true);
-            ui::color::Reset();
-            break;
-        }
-
-        ui::color::Green();
-        ui::SafePrintUtf8("[+] Handshake: " + hello + "\n");
-        ui::color::Reset();
-
-        // DLL 已经打开共享内存并发送 HELLO，现在可以释放 EXE 侧句柄。
-        Injector::CloseSharedMemory();
-
-        // DLL 已连接但可能仍在等待 IL2CPP 初始化，因此 READY 使用更长超时。
-        if (!server.WaitForFrame(protocol::MSG_READY, frame, protocol::DLLSAYREADY_TIMEOUT))
-        {
-            ui::color::Red();
-            if (frame.type == protocol::MSG_ERROR)
-            {
-                ui::DrainAsyncLogs(false);
-                repl::PrintErrorPayload(frame.payload);
-            }
-            else
-            {
-                std::wcerr << L"[Lune Error] Handshake failed: no READY.\n";
-            }
-            ui::color::Reset();
-            break;
-        }
-
-        // 初始化期间到达的 MSG_LOG 由后台线程暂存，进入 REPL 前统一显示。
-        ui::DrainAsyncLogs(false);
-
-        ui::color::Green();
-        std::wcout << L"[+] Ready\n\n";
-        ui::color::Reset();
-
         // ============================================================
         // 启动脚本
         // ============================================================
@@ -610,8 +403,8 @@ int wmain(int argc, wchar_t* argv[])
             const std::string script = "dofile(\"" + scriptPathUtf8 + "\")";
 
             // 脚本错误由 Lua 的 dofile 原样返回；只有断线才阻止进入 REPL。
-            if (!repl::ExecuteCommand(server, script, protocol::LUAFILE_TIMEOUT)
-                && !server.IsConnected())
+            if (!repl::ExecuteCommand(session.handle, script, HC_GetStartupScriptTimeout())
+                && !HC_IsConnected(session.handle))
             {
                 break;
             }
@@ -628,12 +421,12 @@ int wmain(int argc, wchar_t* argv[])
             ui::PrintPrompt();
 
             std::string input;
-            if (!ui::ReadLineUtf8(input, server.GetDisconnectEventHandle()))
+            if (!ui::ReadLineUtf8(input, display.disconnectEvent))
             {
                 // 输入被中断时没有回车回显，先结束提示符行再输出退出消息。
                 ui::SetPromptActive(false);
                 ui::SafePrintUtf8("\n");
-                if (!g_shutdownRequested.load() && !server.IsConnected())
+                if (!g_shutdownRequested.load() && !HC_IsConnected(session.handle))
                 {
                     ui::color::Red();
                     ui::SafePrintUtf8("[Lune Error] Target process disconnected.\n", true);
@@ -652,27 +445,19 @@ int wmain(int argc, wchar_t* argv[])
                 ui::color::Gray();
                 std::wcout << L"\n[*] Sending exit signal...\n";
                 ui::color::Reset();
-                if (server.SendFrame(protocol::MSG_EXIT, nullptr, 0))
+                if (HC_RequestExit(session.handle) == HC_SUCCESS)
                 {
-                    PipeServer::Frame exitFrame;
-                    const auto status = server.ReceiveFrame(
-                        exitFrame,
-                        protocol::EXIT_ACK_TIMEOUT);
-                    if (status == PipeServer::ReceiveStatus::Received
-                        && exitFrame.type == protocol::MSG_EXIT)
-                    {
-                        ui::color::Green();
-                        std::wcout << L"[+] DLL disconnected\n";
-                        ui::color::Reset();
-                    }
+                    ui::color::Green();
+                    std::wcout << L"[+] DLL disconnected\n";
+                    ui::color::Reset();
                 }
                 break;
             }
 
             // 表达式包装 return 只影响 REPL 回显，不改变已经是语句的源码。
             const std::string code = repl::IsStatement(input) ? input : "return " + input;
-            if (!repl::ExecuteCommand(server, code, protocol::COMMAND_TIMEOUT)
-                && !server.IsConnected())
+            if (!repl::ExecuteCommand(session.handle, code, HC_GetCommandTimeout())
+                && !HC_IsConnected(session.handle))
             {
                 ui::color::Red();
                 std::wcerr << L"[Lune Error] Connection lost. DLL may have unloaded.\n";
@@ -698,10 +483,9 @@ int wmain(int argc, wchar_t* argv[])
     ui::color::Gray();
     std::wcout << L"[*] Shutting down...\n";
     ui::color::Reset();
-    server.Stop();
-    Injector::CloseSharedMemory();
+    HC_StopSession(session.handle);
 
-    if (ctrlHandlerInstalled) SetConsoleCtrlHandler(ConsoleCtrlHandler, FALSE);
+    if (display.ctrlHandlerInstalled) SetConsoleCtrlHandler(ConsoleCtrlHandler, FALSE);
     if (result == 0)
     {
         ui::color::Green();
@@ -712,3 +496,5 @@ int wmain(int argc, wchar_t* argv[])
 
     return result;
 }
+
+

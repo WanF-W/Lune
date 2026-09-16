@@ -15,13 +15,7 @@
     <ClCompile Include="src\console_ui.cpp">
       <Filter>cpp_src</Filter>
     </ClCompile>
-    <ClCompile Include="src\injector.cpp">
-      <Filter>cpp_src</Filter>
-    </ClCompile>
     <ClCompile Include="src\lune.cpp">
-      <Filter>cpp_src</Filter>
-    </ClCompile>
-    <ClCompile Include="src\pipe_server.cpp">
       <Filter>cpp_src</Filter>
     </ClCompile>
     <ClCompile Include="src\repl.cpp">
@@ -29,19 +23,7 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="src\backend_profile.h">
-      <Filter>h_src</Filter>
-    </ClInclude>
     <ClInclude Include="src\console_ui.h">
-      <Filter>h_src</Filter>
-    </ClInclude>
-    <ClInclude Include="src\injector.h">
-      <Filter>h_src</Filter>
-    </ClInclude>
-    <ClInclude Include="src\pipe_server.h">
-      <Filter>h_src</Filter>
-    </ClInclude>
-    <ClInclude Include="src\protocol.h">
       <Filter>h_src</Filter>
     </ClInclude>
     <ClInclude Include="src\repl.h">
@@ -50,13 +32,18 @@
     <ClInclude Include="src\version.h">
       <Filter>h_src</Filter>
     </ClInclude>
-    <ClInclude Include="src\win_handle.h">
-      <Filter>h_src</Filter>
-    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="src\version.rc">
       <Filter>rc_src</Filter>
     </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\session_ui.cpp">
+      <Filter>cpp_src</Filter>
+    </ClCompile>
+    <ClInclude Include="src\session_ui.h">
+      <Filter>h_src</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>
