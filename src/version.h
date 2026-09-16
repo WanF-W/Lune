@@ -6,6 +6,6 @@
 // ============================================================
 #pragma once
 
-#define LUNE_VERSION_NUMERIC 1,0,0,0
-#define LUNE_VERSION_STRING "1.0.0"
-#define LUNE_VERSION_WSTRING L"1.0.0"
+#define LUNE_VERSION_NUMERIC 2,0,0,0
+#define LUNE_VERSION_STRING "2.0.0"
+#define LUNE_VERSION_WSTRING L"2.0.0"
